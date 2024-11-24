@@ -633,3 +633,9 @@ _C.VIS_PERIOD = 0
 # Do not commit any configs into it.
 _C.GLOBAL = CN()
 _C.GLOBAL.HACK = 1.0
+
+# Config for Weights and Biases
+_C.WANDB = CN()
+_C.WANDB.PROJECT = "wholeslidedata"
+_C.WANDB.RUN_NAME = "detectron2"
+

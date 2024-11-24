@@ -11,7 +11,7 @@ import torch
 from fvcore.common.history_buffer import HistoryBuffer
 
 from detectron2.utils.file_io import PathManager
-
+import wandb
 __all__ = [
     "get_event_storage",
     "JSONWriter",
@@ -176,6 +176,64 @@ class TensorboardXWriter(EventWriter):
     def close(self):
         if hasattr(self, "_writer"):  # doesn't exist when the code fails at import
             self._writer.close()
+
+
+class WandbWriter(EventWriter):
+    def __init__(self, project_name, run_name=None, window_size=20, **kwargs):
+        """
+        Args:
+            project_name (str): The name of the W&B project.
+            run_name (str): The name of the W&B run.
+            window_size (int): The window size for smoothing metrics.
+            kwargs: Additional arguments for wandb.init().
+
+        TODO: Make this class more like tensorboard writer and consolidate step num / iter logic.
+        """
+        self._window_size = window_size
+        self._last_write = -1
+        wandb.init(project=project_name, name=run_name, **kwargs)
+
+    def write(self):
+        storage = get_event_storage()
+        new_last_write = self._last_write
+        metrics_dict =  storage.latest_with_smoothing_hint(self._window_size).items()
+        wandb_metrics = {}
+
+        new_last_write = self._last_write
+        for k, (v, iter) in metrics_dict:
+            if iter > self._last_write:
+                wandb_metrics[k] = v
+                new_last_write = max(new_last_write, iter)
+        self._last_write = new_last_write
+        
+        if len(storage._vis_data) >= 1:
+            for img_name, img, step_num in storage._vis_data:
+                # Tranpose from C,H,W to H,W,C
+                img = img.transpose(1, 2, 0)
+                # Log both metrics and image for this step
+                log_dict = {
+                    **wandb_metrics,  # Unpack all metrics
+                    img_name: wandb.Image(img)  # Add the image
+                }
+                wandb.log(log_dict, step=step_num)
+            
+            # Storage stores all image data and rely on this writer to clear them.
+            # As a result it assumes only one writer will use its image data.
+            # An alternative design is to let storage store limited recent
+            # data (e.g. only the most recent image) that all writers can access.
+            # In that case a writer may not see all image data if its period is long.
+            storage.clear_images()
+        
+        else:
+            # TODO: Chheck if step is set properly.
+            wandb.log(wandb_metrics, step=new_last_write)
+
+        
+        self._last_write = new_last_write
+
+    
+    def close(self):
+        wandb.finish()
 
 
 class CommonMetricPrinter(EventWriter):
