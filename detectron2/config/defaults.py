@@ -644,6 +644,9 @@ _C.FLOAT32_PRECISION = ""
 # Set to 0 to disable.
 _C.VIS_PERIOD = 0
 
+# Period of PeriodicWriter hook.
+_C.LOG_PERIOD = 20
+
 # global config is for quick hack purposes.
 # You can set them in command line or config files,
 # and access it with:
@@ -655,7 +658,14 @@ _C.VIS_PERIOD = 0
 _C.GLOBAL = CN()
 _C.GLOBAL.HACK = 1.0
 
+# Config for Weights and Biases
 _C.WANDB = CN()
 _C.WANDB.PROJECT = "wholeslidedata"
 _C.WANDB.RUN_NAME = "detectron2"
 
+# ---------------------------------------------------------------------------- #
+# Visualization
+# ---------------------------------------------------------------------------- #
+_C.MODEL.VISUALIZATION = CN()
+_C.MODEL.VISUALIZATION.VIS_MODE = "PREDS"  # Options: "PROPS", "PREDS"
+_C.MODEL.VISUALIZATION.LABEL_COLORS = [] # Allow dynamic label-color mapping

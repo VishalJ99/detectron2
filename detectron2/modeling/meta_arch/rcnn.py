@@ -41,6 +41,8 @@ class GeneralizedRCNN(nn.Module):
         pixel_std: Tuple[float],
         input_format: Optional[str] = None,
         vis_period: int = 0,
+        vis_mode: str = "PREDS",
+        label_colors: List = [],
     ):
         """
         Args:
@@ -59,6 +61,8 @@ class GeneralizedRCNN(nn.Module):
 
         self.input_format = input_format
         self.vis_period = vis_period
+        self.vis_mode = vis_mode
+        self.label_colors = label_colors
         if vis_period > 0:
             assert input_format is not None, "input_format is required for visualization!"
 
@@ -79,6 +83,8 @@ class GeneralizedRCNN(nn.Module):
             "vis_period": cfg.VIS_PERIOD,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
+            "vis_mode": cfg.MODEL.VISUALIZATION.VIS_MODE,
+            "label_colors": cfg.MODEL.VISUALIZATION.LABEL_COLORS,
         }
 
     @property
@@ -88,39 +94,122 @@ class GeneralizedRCNN(nn.Module):
     def _move_to_current_device(self, x):
         return move_device_like(x, self.pixel_mean)
 
-    def visualize_training(self, batched_inputs, proposals):
+    def visualise_validation(self, batched_inputs, proposals):
         """
-        A function used to visualize images and proposals. It shows ground truth
-        bounding boxes on the original image and up to 20 top-scoring predicted
-        object proposals on the original image. Users can implement different
-        visualization functions for different models.
-
-        Args:
-            batched_inputs (list): a list that contains input to the model.
-            proposals (list): a list that contains predicted proposals. Both
-                batched_inputs and proposals should have the same length.
+        A function used to visualize images and proposals during training.
+        OVER WRITTEN by V.J to visualise monocytes and lymphocytes.
+        TODO: Create a PR to view labels during training.
         """
-        from detectron2.utils.visualizer import Visualizer
+        from detectron2.utils.visualizer import Visualizer, ColorMode
 
         storage = get_event_storage()
-        max_vis_prop = 20
+        input, prop = next(zip(batched_inputs, proposals))
 
+        # Temporarily set model to eval mode 
+        self.eval()
+        
+        # Run inference on the first element of the batch
+        pred = self.inference([input])[0]['instances']
+            
+        # Set model back to train mode
+        self.train()
+            
+        img = input["image"]
+        img = convert_image_to_rgb(img.permute(1, 2, 0), self.input_format)
+        
+        # Ground truth visualization (full opacity)
+        v_gt = Visualizer(img, None)
+        colors = [self.label_colors[int(l)] for l in input["instances"].gt_classes]
+        v_gt = v_gt.overlay_instances(
+            boxes=input["instances"].gt_boxes, 
+            assigned_colors=colors,
+            alpha=1  # Fixed alpha for ground truth
+        )
+        anno_img = v_gt.get_image()
+
+        # Prediction visualization (opacity based on confidence)
+        v_pred = Visualizer(img, None)
+        colors = [self.label_colors[int(l)] for l in pred.pred_classes]
+        
+        # Scale confidence scores to reasonable opacity range (e.g., 0.3 to 0.8)
+        alphas = 0.25 + (pred.scores * 0.75)  # This maps [0,1] to [0.25, 1.0]
+        
+        v_pred = v_pred.overlay_instances(
+            boxes=pred.pred_boxes, 
+            assigned_colors=colors,
+            alpha=alphas.tolist()  # Pass list of alphas, one per instance
+        )
+        pred_img = v_pred.get_image()
+        
+        vis_img = np.concatenate((anno_img, pred_img), axis=1)
+        vis_img = vis_img.transpose(2, 0, 1)
+        vis_name = "Left: GT bounding boxes;  Right: Predicted proposals"
+        storage.put_image(vis_name, vis_img)
+
+    
+    def visualize_training(self, batched_inputs, proposals):
+        """
+        A function used to visualize images and proposals during training.
+        OVER WRITTEN by V.J to visualise monocytes and lymphocytes.
+        TODO: Create a PR to view labels during training.
+        """
+        from detectron2.utils.visualizer import Visualizer
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        storage = get_event_storage()
+        colours = ['red', 'green']
         for input, prop in zip(batched_inputs, proposals):
             img = input["image"]
             img = convert_image_to_rgb(img.permute(1, 2, 0), self.input_format)
-            v_gt = Visualizer(img, None)
-            v_gt = v_gt.overlay_instances(boxes=input["instances"].gt_boxes)
-            anno_img = v_gt.get_image()
-            box_size = min(len(prop.proposal_boxes), max_vis_prop)
-            v_pred = Visualizer(img, None)
-            v_pred = v_pred.overlay_instances(
-                boxes=prop.proposal_boxes[0:box_size].tensor.cpu().numpy()
-            )
-            prop_img = v_pred.get_image()
-            vis_img = np.concatenate((anno_img, prop_img), axis=1)
-            vis_img = vis_img.transpose(2, 0, 1)
-            vis_name = "Left: GT bounding boxes;  Right: Predicted proposals"
-            storage.put_image(vis_name, vis_img)
+            
+            # Normalize image for display
+            normalised_img = (img - np.min(img)) / (np.max(img) - np.min(img))
+            
+            plt.figure(figsize=(15, 5))
+            
+            # Ground truth visualization
+            plt.subplot(1, 2, 1)
+            plt.imshow(normalised_img)
+            plt.title("Ground Truth")
+            
+            # Plot ground truth boxes
+            for box in input["instances"].gt_boxes:
+                x1, y1, x2, y2 = box.cpu().numpy()
+                rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, 
+                                   fill=False, 
+                                   color='r',  # Adjust colors as needed
+                                   linewidth=2)
+                plt.gca().add_patch(rect)
+            
+            # Predictions visualization
+            plt.subplot(1, 2, 2)
+            plt.imshow(normalised_img)
+            plt.title("Predictions")
+            
+            # Plot predicted boxes
+            boxes = prop.proposal_boxes.tensor.cpu().numpy()
+            for box in boxes:
+                x1, y1, x2, y2 = box
+                rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, 
+                                   fill=False, 
+                                   color='g',  # Adjust colors as needed
+                                   linewidth=2)
+                plt.gca().add_patch(rect)
+            
+            # Convert plot to tensor for storage
+            plt.tight_layout()
+            fig = plt.gcf()
+            fig.canvas.draw()
+            
+            # Convert figure to numpy array
+            vis_img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            vis_img = vis_img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            vis_img = vis_img.transpose(2, 0, 1)  # Convert to C,H,W format
+            
+            plt.close()
+            
+            storage.put_image("Training visualization", vis_img)
             break  # only visualize one image in a batch
 
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
@@ -168,7 +257,10 @@ class GeneralizedRCNN(nn.Module):
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:
-                self.visualize_training(batched_inputs, proposals)
+                if self.vis_mode == "PREDS":
+                    self.visualise_validation(batched_inputs, proposals)
+                else:
+                    self.visualize_training(batched_inputs, proposals)
 
         losses = {}
         losses.update(detector_losses)

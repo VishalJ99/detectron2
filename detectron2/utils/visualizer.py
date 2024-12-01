@@ -653,6 +653,9 @@ class Visualizer:
             assigned_colors (list[matplotlib.colors]): a list of colors, where each color
                 corresponds to each mask or box in the image. Refer to 'matplotlib.colors'
                 for full list of formats that the colors are accepted in.
+            alpha (float or list[float]): transparency of the instances. If a single float is provided,
+                all instances will have the same transparency. If a list is provided, each value will
+                correspond to the transparency of each instance.
         Returns:
             output (VisImage): image object with visualizations.
         """
@@ -702,7 +705,7 @@ class Visualizer:
         for i in range(num_instances):
             color = assigned_colors[i]
             if boxes is not None:
-                self.draw_box(boxes[i], edge_color=color)
+                self.draw_box(boxes[i], edge_color=color, alpha=alpha if not isinstance(alpha, list) else alpha[i])
 
             if masks is not None:
                 for segment in masks[i].polygons:
@@ -1221,7 +1224,7 @@ class Visualizer:
         Convert different format of boxes to an NxB array, where B = 4 or 5 is the box dimension.
         """
         if isinstance(boxes, Boxes) or isinstance(boxes, RotatedBoxes):
-            return boxes.tensor.detach().numpy()
+            return boxes.tensor.cpu().detach().numpy()
         else:
             return np.asarray(boxes)
 
